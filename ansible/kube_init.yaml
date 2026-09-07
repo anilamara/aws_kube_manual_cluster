@@ -1,0 +1,89 @@
+---
+- name: Initialize First Master Node
+  hosts: masters[0]
+  become: yes
+  tasks:
+    - name: Check if cluster is already initialized
+      stat:
+        path: /etc/kubernetes/admin.conf
+      register: kubeadm_conf
+
+    - name: Initialize Kubernetes control plane
+      command: >
+        kubeadm init
+        --control-plane-endpoint "production-k8s-api-nlb-fa93fbe2ac7be918.elb.ap-south-1.amazonaws.com:6443"
+        --upload-certs
+        --cri-socket "unix:///var/run/crio/crio.sock"
+        --pod-network-cidr "192.168.0.0/16"
+      when: not kubeadm_conf.stat.exists
+      register: kubeadm_init
+
+    - name: Setup kubeconfig directory for ec2-user
+      file:
+        path: /home/ec2-user/.kube
+        state: directory
+        owner: ec2-user
+        group: ec2-user
+        mode: '0755'
+
+    - name: Copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ec2-user/.kube/config
+        remote_src: yes
+        owner: ec2-user
+        group: ec2-user
+        mode: '0600'
+
+    - name: Install Calico network plugin operator
+      become_user: ec2-user
+      command: kubectl apply --server-side --force-conflicts -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/tigera-operator.yaml
+
+    - name: Install Calico custom resources
+      become_user: ec2-user
+      command: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.28.1/manifests/custom-resources.yaml
+
+    - name: Pause for 10 seconds for Calico network to settle
+      ansible.builtin.pause:
+        seconds: 10
+
+    - name: Upload fresh certificates and get key
+      command: kubeadm init phase upload-certs --upload-certs
+      register: cert_key_output
+      changed_when: false
+
+    - name: Generate standard join token
+      command: kubeadm token create --print-join-command
+      register: standard_join_command
+      changed_when: false
+
+    - name: Set dynamic facts for join commands
+      set_fact:
+        worker_join: "{{ standard_join_command.stdout }} --cri-socket unix:///var/run/crio/crio.sock"
+        master_join: "{{ standard_join_command.stdout }} --control-plane --certificate-key {{ cert_key_output.stdout_lines[-1] }} --cri-socket unix:///var/run/crio/crio.sock"
+
+- name: Join Additional Master Nodes
+  hosts: masters:!masters[0]
+  become: yes
+  tasks:
+    - name: Check if node is already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Join control plane
+      command: "{{ hostvars[groups['masters'][0]]['master_join'] }}"
+      when: not kubelet_conf.stat.exists
+
+- name: Join Worker Nodes
+  hosts: workers
+  become: yes
+  tasks:
+    - name: Check if node is already joined
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf
+
+    - name: Join cluster as worker
+      command: "{{ hostvars[groups['masters'][0]]['worker_join'] }}"
+      when: not kubelet_conf.stat.exists

@@ -61,6 +61,12 @@ resource "aws_route_table" "private" {
     cidr_block     = "0.0.0.0/0"
     nat_gateway_id = aws_nat_gateway.nat[count.index].id
   }
+
+  # NEW route to the Jump Server Default VPC via Peering
+  route {
+    cidr_block                = "172.31.0.0/16"          # Verify this is your Default VPC CIDR
+    vpc_peering_connection_id = "pcx-0d99e509667b0c129"    # PASTE YOUR ACTUAL PCX ID HERE
+  }
 }
 
 resource "aws_route_table_association" "private" {

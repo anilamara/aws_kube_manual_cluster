@@ -6,11 +6,15 @@ resource "aws_lb" "k8s_api" {
 }
 
 resource "aws_lb_target_group" "k8s_api" {
-  name        = "${var.environment}-k8s-api-tg"
+  name        = "production-k8s-api-tg-ip"
   port        = 6443
   protocol    = "TCP"
   vpc_id      = var.vpc_id
-  target_type = "instance"
+  target_type = "ip"
+ 
+  lifecycle {
+    create_before_destroy = true
+  }
 
   health_check {
     protocol            = "TCP"

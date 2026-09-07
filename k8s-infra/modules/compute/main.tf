@@ -1,13 +1,7 @@
 data "aws_ami" "rhel9" {
-  most_recent = true
-  owners      = ["301981869874"]
   filter {
-    name   = "name"
-    values = ["RHEL-9*_HVM-*-x86_64-*-Hourly2-*"]
-  }
-  filter {
-    name   = "architecture"
-    values = ["x86_64"]
+    name   = "image-id"
+    values = ["ami-0af7e19d7f4a36103"]
   }
 }
 
@@ -28,6 +22,14 @@ resource "aws_security_group" "k8s_nodes" {
     cidr_blocks = ["10.0.0.0/16"]
   }
 
+  ingress {
+    description = "Allow SSH from Default VPC Jump Server"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["172.31.0.0/16"] # Ensure this matches your Default VPC CIDR
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -39,7 +41,7 @@ resource "aws_security_group" "k8s_nodes" {
 resource "aws_instance" "master" {
   count                  = 3
   ami                    = data.aws_ami.rhel9.id
-  instance_type          = "t3.large"
+  instance_type          = "c7i-flex.large"
   subnet_id              = var.private_subnet_ids[count.index]
   vpc_security_group_ids = [aws_security_group.k8s_nodes.id]
   key_name               = aws_key_pair.k8s_auth.key_name
@@ -70,14 +72,14 @@ resource "aws_volume_attachment" "etcd_attach" {
 resource "aws_lb_target_group_attachment" "master_api" {
   count            = 3
   target_group_arn = var.target_group_arn
-  target_id        = aws_instance.master[count.index].id
+  target_id = aws_instance.master[count.index].private_ip
   port             = 6443
 }
 
 resource "aws_instance" "worker" {
   count                  = 2
   ami                    = data.aws_ami.rhel9.id
-  instance_type          = "t3.large"
+  instance_type          = "c7i-flex.large"
   subnet_id              = var.private_subnet_ids[count.index]
   vpc_security_group_ids = [aws_security_group.k8s_nodes.id]
   key_name               = aws_key_pair.k8s_auth.key_name
