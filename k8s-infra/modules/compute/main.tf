@@ -89,3 +89,109 @@ resource "aws_instance" "worker" {
     Role = "worker"
   }
 }
+
+# ---------------------------------------------------------
+# Security Group for Kubernetes Master (Control Plane) Nodes
+# ---------------------------------------------------------
+resource "aws_security_group" "k8s_master_sg" {
+  name        = "production-k8s-master-sg"
+  description = "Allow required ports for Kubernetes control plane"
+  vpc_id      = var.vpc_id
+
+  # Kubernetes API Server (From Load Balancer, Jump Server, and Workers)
+  ingress {
+    from_port   = 6443
+    to_port     = 6443
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # etcd server client API (From other Master nodes)
+  ingress {
+    from_port   = 2379
+    to_port     = 2380
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Kubelet API, kube-scheduler, kube-controller-manager
+  ingress {
+    from_port   = 10250
+    to_port     = 10259
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Calico Networking (BGP, VXLAN, IP-in-IP) and pod-to-pod traffic
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1" # Allows all protocols internally
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # SSH from Jump Server
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Allow all outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# ---------------------------------------------------------
+# Security Group for Kubernetes Worker Nodes
+# ---------------------------------------------------------
+resource "aws_security_group" "k8s_worker_sg" {
+  name        = "production-k8s-worker-sg"
+  description = "Allow required ports for Kubernetes worker nodes"
+  vpc_id      = var.vpc_id
+
+  # Kubelet API (From Control Plane)
+  ingress {
+    from_port   = 10250
+    to_port     = 10250
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # NodePort Services (Allows testing via Jump Server and external Load Balancers)
+  ingress {
+    from_port   = 30000
+    to_port     = 32767
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Calico Networking (BGP, VXLAN, IP-in-IP) and pod-to-pod traffic
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # SSH from Jump Server
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+  }
+
+  # Allow all outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
